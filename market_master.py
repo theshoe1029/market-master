@@ -377,10 +377,14 @@ class ExploitativeStrategy:
     def __init__(
         self,
         min_edge_fraction: float = 0.0,
-        max_inside_spread: float = random.uniform(0.1, 0.2),
+        max_inside_spread: float | None = None,
     ):
         self.min_edge_fraction = min_edge_fraction
-        self.max_inside_spread = max_inside_spread
+        self.max_inside_spread = (
+            max_inside_spread
+            if max_inside_spread is not None
+            else random.uniform(0.05, 0.10)
+        )
         self._history: list[_QuoteRecord] = []
 
     @property
@@ -534,7 +538,7 @@ def _validate_fixed_spread(
 
 
 def _timed_input(prompt: str, timeout: float) -> str | None:
-    """Read a line; prints 5…1 on new lines in the final seconds. Returns None on timeout."""
+    """Read a line; prints '5 seconds left' once near the end. Returns None on timeout."""
     if timeout <= 0:
         try:
             return input(prompt).strip()
@@ -547,6 +551,12 @@ def _timed_input(prompt: str, timeout: float) -> str | None:
         except EOFError:
             return None
 
+    if sys.platform == "win32":
+        return _timed_input_windows(prompt, timeout)
+    return _timed_input_posix(prompt, timeout)
+
+
+def _timed_input_posix(prompt: str, timeout: float) -> str | None:
     import select
 
     deadline = time.monotonic() + timeout
@@ -582,6 +592,61 @@ def _timed_input(prompt: str, timeout: float) -> str | None:
         raise
 
 
+def _timed_input_windows(prompt: str, timeout: float) -> str | None:
+    import msvcrt
+
+    deadline = time.monotonic() + timeout
+    warned = False
+    buf: list[str] = []
+
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            return None
+
+        if not warned and remaining <= 5:
+            sys.stdout.write("\n5 seconds left\n")
+            sys.stdout.write(prompt + "".join(buf))
+            sys.stdout.flush()
+            warned = True
+
+        if msvcrt.kbhit():
+            ch = msvcrt.getwch()
+            if ch == "\x03":  # Ctrl-C
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                raise KeyboardInterrupt
+            if ch in ("\r", "\n"):
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                line = "".join(buf).strip()
+                if time.monotonic() > deadline:
+                    if line:
+                        print("(received after time expired — ignored)")
+                    return None
+                return line
+            if ch in ("\x08", "\x7f"):  # Backspace
+                if buf:
+                    buf.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                continue
+            if ch in ("\x00", "\xe0"):
+                # Function/arrow key prefix; consume the scancode and ignore.
+                msvcrt.getwch()
+                continue
+            buf.append(ch)
+            sys.stdout.write(ch)
+            sys.stdout.flush()
+        else:
+            time.sleep(0.02)
+
+
 def _prompt_rounds_per_question(default: int = 6) -> int:
     try:
         raw = input(f"Rounds per question [{default}]: ").strip()
@@ -600,13 +665,16 @@ def _prompt_rounds_per_question(default: int = 6) -> int:
         return default
 
 
-def _prompt_fixed_spread() -> float | None:
+def _prompt_fixed_spread(default: float = 0.10) -> float | None:
+    default_pct = default * 100
     try:
-        raw = input("Fixed spread % of midpoint [none]: ").strip()
+        raw = input(f"Fixed spread % of midpoint [{default_pct:g}]: ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
-        return None
-    if not raw or raw.lower() in {"none", "n"}:
+        return default
+    if not raw:
+        return default
+    if raw.lower() in {"none", "n"}:
         return None
     raw = raw.rstrip("%").strip()
     try:
@@ -615,8 +683,8 @@ def _prompt_fixed_spread() -> float | None:
             raise ValueError
         return val / 100
     except ValueError:
-        print("Invalid input, no fixed spread.")
-        return None
+        print(f"Invalid input, using {default_pct:g}%.")
+        return default
 
 
 def _prompt_time_limit(default: int = 30) -> float:
@@ -669,7 +737,7 @@ def _print_header(
     else:
         print("  <bid> <ask>   quote prices (bid < ask, max spread enforced)")
     print("  status        show position and trade history")
-    print("  skip          abandon this question (no P&L)")
+    print("  pass / skip   abandon this question and get a new one (no P&L)")
     print("  quit          exit the game")
     print()
 
@@ -784,7 +852,7 @@ def _run_question_session(
             if lower == "status":
                 _print_status(state, debug=debug)
                 continue
-            if lower == "skip":
+            if lower in {"skip", "pass"}:
                 print("Skipping this question (no P&L).\n")
                 return 0.0
 
@@ -874,6 +942,8 @@ def main() -> None:
         strategy = STRATEGY_CHOICES[args.strategy]()
     else:
         strategy = _prompt_strategy()
+    if isinstance(strategy, ExploitativeStrategy) and fixed_spread is not None:
+        strategy.max_inside_spread = random.uniform(0.5, 0.8) * fixed_spread
     _print_header(rounds_per_question, fixed_spread, time_limit, strategy.name)
 
     session_pnl = 0.0
