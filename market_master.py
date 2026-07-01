@@ -9,11 +9,13 @@ your quotes using a simple random-belief strategy (for now).
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 
@@ -111,12 +113,6 @@ def _gen_power() -> Question:
     return Question(f"What is {base}^{exp:g}?", base ** exp)
 
 
-def _gen_integer_power() -> Question:
-    base = random.randint(2, 9)
-    exp = random.randint(2, 5)
-    return Question(f"What is {base}^{exp}?", float(base ** exp), integer=True)
-
-
 MATH_GENERATORS: list[QuestionFactory] = [
     _gen_log10,
     _gen_ln,
@@ -126,7 +122,6 @@ MATH_GENERATORS: list[QuestionFactory] = [
     _gen_cos,
     _gen_tan,
     _gen_power,
-    _gen_integer_power,
 ]
 
 STATIC_QUESTIONS: list[Question] = [
@@ -149,142 +144,32 @@ STATIC_QUESTIONS: list[Question] = [
     Question("What is the golden ratio φ = (1 + √5) / 2?", (1 + math.sqrt(5)) / 2),
 ]
 
+FERMI_QUESTIONS_PATH = Path(__file__).with_name("fermi_questions.json")
+
+
+def _load_fermi_questions(path: Path = FERMI_QUESTIONS_PATH) -> list[Question]:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return [
+        Question(
+            item["prompt"],
+            float(item["answer"]),
+            integer=bool(item.get("integer", True)),
+        )
+        for item in data
+    ]
+
+
 # Canonical order-of-magnitude answers for Fermi-style estimation practice.
-FERMI_QUESTIONS: list[Question] = [
-    Question(
-        "How many gas stations are there in the United States?",
-        145_000,
-        integer=True,
-    ),
-    Question(
-        "How many piano tuners are there in New York City?",
-        300,
-        integer=True,
-    ),
-    Question(
-        "How many golf balls fit in a standard school bus?",
-        50_000,
-        integer=True,
-    ),
-    Question(
-        "How many hairs are on the average human head?",
-        100_000,
-        integer=True,
-    ),
-    Question(
-        "How many miles of interstate highway are there in the United States?",
-        47_000,
-        integer=True,
-    ),
-    Question(
-        "How many Starbucks locations are there worldwide?",
-        38_000,
-        integer=True,
-    ),
-    Question(
-        "How many McDonald's restaurants are there in the United States?",
-        13_500,
-        integer=True,
-    ),
-    Question(
-        "How many licensed drivers are there in the United States?",
-        230_000_000,
-        integer=True,
-    ),
-    Question(
-        "How many pizza restaurants are there in the United States?",
-        75_000,
-        integer=True,
-    ),
-    Question(
-        "How many K-12 schools are there in the United States?",
-        130_000,
-        integer=True,
-    ),
-    Question(
-        "What is the height of Mount Everest in feet?",
-        29_032,
-        integer=True,
-    ),
-    Question(
-        "What is the average distance from the Earth to the Moon in miles?",
-        238_900,
-        integer=True,
-    ),
-    Question(
-        "How many seats are in Yankee Stadium?",
-        47_000,
-        integer=True,
-    ),
-    Question(
-        "How many babies are born in the United States per day?",
-        10_000,
-        integer=True,
-    ),
-    Question(
-        "How many commercial flight departures are there per day in the United States?",
-        28_000,
-        integer=True,
-    ),
-    Question(
-        "How many golf courses are there in the United States?",
-        16_000,
-        integer=True,
-    ),
-    Question(
-        "How many words are in the average adult's vocabulary?",
-        30_000,
-        integer=True,
-    ),
-    Question(
-        "How many pet dogs are there in the United States?",
-        90_000_000,
-        integer=True,
-    ),
-    Question(
-        "How many convenience stores are there in the United States?",
-        150_000,
-        integer=True,
-    ),
-    Question(
-        "What is the population of Canada?",
-        41_000_000,
-        integer=True,
-    ),
-    Question(
-        "How many bridges are there in New York City?",
-        2_000,
-        integer=True,
-    ),
-    Question(
-        "How many acres is Central Park?",
-        843,
-        integer=True,
-    ),
-    Question(
-        "How many tennis balls fit in a standard limousine?",
-        60_000,
-        integer=True,
-    ),
-    Question(
-        "How many barbershops are there in the United States?",
-        100_000,
-        integer=True,
-    ),
-    Question(
-        "How many movie tickets are sold in the United States per year?",
-        1_200_000_000,
-        integer=True,
-    ),
-]
+FERMI_QUESTIONS: list[Question] = _load_fermi_questions()
 
 
 def random_question() -> Question:
     roll = random.random()
-    if roll < 0.60:
-        return random.choice(MATH_GENERATORS)()
-    if roll < 0.85:
-        return random.choice(FERMI_QUESTIONS)
+    if roll < 0.70:
+        return random.choice(FERMI_QUESTIONS)()
+    if roll < 0.95:
+        return random.choice(MATH_GENERATORS)
     return random.choice(STATIC_QUESTIONS)
 
 
